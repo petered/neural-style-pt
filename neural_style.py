@@ -1,5 +1,7 @@
 import os
 import copy
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,7 +17,10 @@ parser.add_argument("-style_image", help="Style target image", default='examples
 parser.add_argument("-style_blend_weights", default=None)
 parser.add_argument("-content_image", help="Content target image", default='examples/inputs/tubingen.jpg')
 parser.add_argument("-image_size", help="Maximum height / width of generated image", type=int, default=512)
+parser.add_argument("-mask_image", help="Content mask image", default=None)
+
 parser.add_argument("-gpu", help="Zero-indexed ID of the GPU to use; for CPU mode set -gpu = c", default=0)
+parser.add_argument("-root", help="Root folder from which relative paths are referenced", default=os.getcwd())
 
 # Optimization options
 parser.add_argument("-content_weight", type=float, default=5e0)
@@ -58,10 +63,19 @@ Image.MAX_IMAGE_PIXELS = 1000000000 # Support gigapixel images
 def main():
     dtype, multidevice, backward_device = setup_gpu()
 
+    root_dir = os.path.expanduser(params.root)
+    content_image_path = os.path.join(root_dir, params.content_image)
+    style_image_path = os.path.join(root_dir, params.style_image)
+    output_image_path = os.path.join(root_dir, params.output_image)
+    mask_image_path = os.path.join(root_dir, params.mask_image)
+
     cnn, layerList = loadCaffemodel(params.model_file, params.pooling, params.gpu, params.disable_check)
 
-    content_image = preprocess(params.content_image, params.image_size).type(dtype)
-    style_image_input = params.style_image.split(',')
+    content_image = preprocess(content_image_path, params.image_size).type(dtype)
+
+    mask_tensor = preprocess_mask(mask_image_path, mask_size=params.image_size)  # TODO: Do once per content layer
+
+    style_image_input = style_image_path.split(',')
     style_image_list, ext = [], [".jpg", ".jpeg", ".png", ".tiff"]
     for image in style_image_input:
         if os.path.isdir(image):
@@ -122,7 +136,13 @@ def main():
 
                 if layerList['C'][c] in content_layers:
                     print("Setting up content layer " + str(i) + ": " + str(layerList['C'][c]))
-                    loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
+
+                    if mask_tensor is not None:
+                        loss_module = MaskedContentLoss(params.content_weight, params.normalize_gradients, mask=mask_tensor)
+                    else:
+                        loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
+
+                    # loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
                     net.add_module(str(len(net)), loss_module)
                     content_losses.append(loss_module)
 
@@ -138,7 +158,12 @@ def main():
 
                 if layerList['R'][r] in content_layers:
                     print("Setting up content layer " + str(i) + ": " + str(layerList['R'][r]))
-                    loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
+
+                    if mask_tensor is not None:
+                        loss_module = MaskedContentLoss(params.content_weight, params.normalize_gradients, mask=mask_tensor)
+                    else:
+                        loss_module = ContentLoss(params.content_weight, params.normalize_gradients)
+
                     net.add_module(str(len(net)), loss_module)
                     content_losses.append(loss_module)
                     next_content_idx += 1
@@ -218,7 +243,7 @@ def main():
         should_save = params.save_iter > 0 and t % params.save_iter == 0
         should_save = should_save or t == params.num_iterations
         if should_save:
-            output_filename, file_extension = os.path.splitext(params.output_image)
+            output_filename, file_extension = os.path.splitext(output_image_path)
             if t == params.num_iterations:
                 filename = output_filename + str(file_extension)
             else:
@@ -344,6 +369,13 @@ def preprocess(image_name, image_size):
     return tensor
 
 
+def preprocess_mask(mask_image_path, mask_size: Tuple[int, int]) -> "Tensor['H,W', float]":
+    image = Image.open(mask_image_path).convert('L')
+    Loader = transforms.Compose([transforms.Resize(mask_size), transforms.ToTensor()])
+    tensor = Loader(image)
+    return tensor[0]
+
+
 #  Undo the above preprocessing.
 def deprocess(output_tensor):
     Normalize = transforms.Compose([transforms.Normalize(mean=[-103.939, -116.779, -123.68], std=[1,1,1])])
@@ -433,6 +465,34 @@ class ContentLoss(nn.Module):
         elif self.mode == 'capture':
             self.target = input.detach()
         return input
+
+
+class MaskedContentLoss(nn.Module):
+
+    def __init__(self, strength, normalize, mask: 'Tensor["H,W",3]'):
+        super(MaskedContentLoss, self).__init__()
+        self.strength = strength
+        self.crit = nn.MSELoss()
+        self.mode = 'None'
+        self.normalize = normalize
+        self.mask = mask
+        self._scale_factor: "Tensor['1,1,H2,W2', float]" = None
+
+    def forward(self, input):
+        if self.mode == 'loss':
+
+            if self._scale_factor is None:
+                self._scale_factor = torch.sqrt(transforms.Resize(input.size()[2:4])(self.mask[None, None, :, :]))
+            loss = self.crit(input*self._scale_factor, self.target*self._scale_factor)
+            if self.normalize:
+                loss = ScaleGradients.apply(loss, self.strength)
+            self.loss = loss * self.strength
+        elif self.mode == 'capture':
+            self.target = input.detach()
+        return input
+
+
+
 
 
 class GramMatrix(nn.Module):
