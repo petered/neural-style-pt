@@ -18,6 +18,8 @@ parser.add_argument("-style_blend_weights", default=None)
 parser.add_argument("-content_image", help="Content target image", default='examples/inputs/tubingen.jpg')
 parser.add_argument("-image_size", help="Maximum height / width of generated image", type=int, default=512)
 parser.add_argument("-mask_image", help="Content mask image", default=None)
+parser.add_argument("-mask_image_base", help="Content weight of zero-regions in content mask", default=0., type=float)
+
 
 parser.add_argument("-gpu", help="Zero-indexed ID of the GPU to use; for CPU mode set -gpu = c", default=0)
 parser.add_argument("-root", help="Root folder from which relative paths are referenced", default=os.getcwd())
@@ -73,7 +75,13 @@ def main():
 
     content_image = preprocess(content_image_path, params.image_size).type(dtype)
 
-    mask_tensor = preprocess_mask(mask_image_path, mask_size=params.image_size)  # TODO: Do once per content layer
+    if mask_image_path is not None:
+        mask_tensor = preprocess_mask(mask_image_path, mask_size=params.image_size)  # TODO: Do once per content layer
+        if params.mask_image_base:
+            mask_tensor = (1-params.mask_image_base) * mask_tensor + params.mask_image_base
+
+    else:
+        mask_tensor = None
 
     style_image_input = style_image_path.split(',')
     style_image_list, ext = [], [".jpg", ".jpeg", ".png", ".tiff"]
