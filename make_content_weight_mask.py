@@ -1,3 +1,4 @@
+import os.path
 from typing import Optional
 
 import cv2
@@ -51,7 +52,7 @@ def draw_mask_on_image(image: 'Array[(H,W,3),uint8]', max_scale: int = 1000) -> 
 
 def fade_mask_with_half_life(mask, half_life: float, base: float = 0):
     distances = cv2.distanceTransform((mask == 0).astype(np.uint8), distanceType=cv2.DIST_L2, maskSize=5)
-    scales = base + (1-base) * 2 ** (-distances / half_life)
+    scales = base + (1 - base) * 2 ** (-distances / half_life)
     return (scales * 255).astype(np.uint8)
 
 
@@ -83,10 +84,11 @@ def make_mask_image(content_path: str, mask_path: str, max_scale=1000):
             if len(undo_history) == 0:
                 print("Undo history empty")
             else:
-                mask = undo_history.pop().pop()
+                mask = undo_history.pop()
         elif cmd == 'save':
-            cv2.imwrite(mask_path, mask)
-            print(f'Saved to {mask_path}')
+            file_path = os.path.expanduser(args[0] if len(args) > 0 else mask_path)
+            cv2.imwrite(file_path, mask)
+            print(f'Saved to {file_path}')
         elif cmd in ('q', 'quit'):
             break
 

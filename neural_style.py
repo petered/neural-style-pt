@@ -70,6 +70,7 @@ def main():
     style_image_path = os.path.join(root_dir, params.style_image)
     output_image_path = os.path.join(root_dir, params.output_image)
     mask_image_path = os.path.join(root_dir, params.mask_image)
+    init_image_path = os.path.join(root_dir, params.init_image) if params.init_image is not None else None
 
     cnn, layerList = loadCaffemodel(params.model_file, params.pooling, params.gpu, params.disable_check)
 
@@ -98,9 +99,11 @@ def main():
         img_caffe = preprocess(image, style_size).type(dtype)
         style_images_caffe.append(img_caffe)
 
-    if params.init_image != None:
+    if init_image_path is not None:
         image_size = (content_image.size(2), content_image.size(3))
-        init_image = preprocess(params.init_image, image_size).type(dtype)
+        init_image = preprocess(init_image_path, image_size).type(dtype)
+    else:
+        init_image = None
 
     # Handle style blending weights for multiple style inputs
     style_blend_weights = []
