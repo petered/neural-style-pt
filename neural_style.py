@@ -69,7 +69,7 @@ def main():
     content_image_path = os.path.join(root_dir, params.content_image)
     style_image_path = os.path.join(root_dir, params.style_image)
     output_image_path = os.path.join(root_dir, params.output_image)
-    mask_image_path = os.path.join(root_dir, params.mask_image)
+    mask_image_path = os.path.join(root_dir, params.mask_image) if params.mask_image is not None else None
     init_image_path = os.path.join(root_dir, params.init_image) if params.init_image is not None else None
 
     cnn, layerList = loadCaffemodel(params.model_file, params.pooling, params.gpu, params.disable_check)
